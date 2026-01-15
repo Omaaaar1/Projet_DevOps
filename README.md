@@ -12,3 +12,4 @@ Ce projet est une API REST développée en Python (Flask) conteneurisée avec Do
 ```bash
 docker build -t devops-project .
 docker run -p 5000:5000 devops-project
+"- Maintainers: [RjabOmar]"
