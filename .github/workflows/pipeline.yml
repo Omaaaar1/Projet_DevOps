@@ -10,6 +10,16 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    # C'est LA solution propre : On définit un "Service"
+    services:
+      # On donne un nom au service
+      app-service:
+        # On utilise l'image qu'on veut tester.
+        # Astuce pour la soutenance : comme on vient de la builder, on ne peut pas l'utiliser directement ici.
+        # On va utiliser une méthode standard : lancer le conteneur dans les steps mais avec le bon driver réseau.
+        image: python:3.9-slim
+        options: --name app-container
+
     steps:
     - name: Récupération du code
       uses: actions/checkout@v2
@@ -25,48 +35,34 @@ jobs:
         pip install -r requirements.txt
         pip install bandit pytest
 
+    # SAST (Bandit)
     - name: Analyse de Sécurité (SAST - Bandit)
       run: bandit -r app.py || true
 
+    # Build Docker (Vérification)
     - name: Construction Image Docker
       run: docker build -t my-devops-app .
 
-    # CORRECTION : Créer un réseau Docker
-    - name: Créer un réseau Docker
-      run: docker network create test-network
+    # --- DAST PROPRE (Solution Réseau Host) ---
 
-    # CORRECTION : Lancer l'app sur le réseau
-    - name: Lancer le conteneur
+    # 1. On lance le conteneur en mode "détaché" sur le réseau de l'hôte
+    # C'est ce qui permet à ZAP de le voir sur localhost
+    - name: Lancer l'application
       run: |
-        docker run -d --name dast-target --network test-network my-devops-app
-        sleep 10
+        docker run -d --network host --name my-app-running my-devops-app
+        sleep 5
 
-    # CORRECTION : Vérifier que l'app fonctionne
+    # 2. Vérification rapide que l'app répond
     - name: Vérifier l'application
-      run: |
-        docker logs dast-target
-        docker exec dast-target curl -f http://localhost:5000 || echo "App may not be ready"
+      run: curl -v http://localhost:5000/ || echo "App not ready yet"
 
-    # CORRECTION : Scanner avec ZAP sur le même réseau
+    # 3. Scan ZAP (DAST)
+    # On utilise l'action officielle "Baseline Scan" qui est plus robuste
     - name: Analyse de Sécurité (DAST - OWASP ZAP)
-      run: |
-        docker run --network test-network -v $(pwd):/zap/wrk/:rw \
-          -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-          -t http://dast-target:5000 \
-          -r zap-report.html || true
-
-    # CORRECTION : Nettoyer
-    - name: Nettoyage
-      if: always()
-      run: |
-        docker stop dast-target || true
-        docker rm dast-target || true
-        docker network rm test-network || true
-
-    # BONUS : Publier le rapport ZAP
-    - name: Publier le rapport ZAP
-      if: always()
-      uses: actions/upload-artifact@v3
+      uses: zaproxy/action-baseline@v0.12.0
       with:
-        name: zap-report
-        path: zap-report.html
+        target: 'http://localhost:5000'
+        # On ne fail pas le build si des "warnings" sont trouvés, c'est normal pour un projet étudiant
+        # Mais le scan s'exécutera vraiment !
+        fail_action: false
+        allow_issue_writing: false
