@@ -10,16 +10,6 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    # C'est LA solution propre : On définit un "Service"
-    services:
-      # On donne un nom au service
-      app-service:
-        # On utilise l'image qu'on veut tester.
-        # Astuce pour la soutenance : comme on vient de la builder, on ne peut pas l'utiliser directement ici.
-        # On va utiliser une méthode standard : lancer le conteneur dans les steps mais avec le bon driver réseau.
-        image: python:3.9-slim
-        options: --name app-container
-
     steps:
     - name: Récupération du code
       uses: actions/checkout@v2
@@ -43,10 +33,9 @@ jobs:
     - name: Construction Image Docker
       run: docker build -t my-devops-app .
 
-    # --- DAST PROPRE (Solution Réseau Host) ---
+    # --- DAST PROPRE ET SIMPLE ---
 
     # 1. On lance le conteneur en mode "détaché" sur le réseau de l'hôte
-    # C'est ce qui permet à ZAP de le voir sur localhost
     - name: Lancer l'application
       run: |
         docker run -d --network host --name my-app-running my-devops-app
@@ -57,12 +46,14 @@ jobs:
       run: curl -v http://localhost:5000/ || echo "App not ready yet"
 
     # 3. Scan ZAP (DAST)
-    # On utilise l'action officielle "Baseline Scan" qui est plus robuste
+    # On utilise l'action officielle mais sans essayer de générer/uploader des rapports complexes qui échouent
     - name: Analyse de Sécurité (DAST - OWASP ZAP)
       uses: zaproxy/action-baseline@v0.12.0
       with:
         target: 'http://localhost:5000'
-        # On ne fail pas le build si des "warnings" sont trouvés, c'est normal pour un projet étudiant
-        # Mais le scan s'exécutera vraiment !
+        # Ne pas bloquer le build sur des warnings
         fail_action: false
+        # Désactiver l'écriture de fichiers de rapport qui cause des problèmes de permission
         allow_issue_writing: false
+        # Ne pas créer d'artefact "zap_scan" automatiquement (source de l'erreur)
+        artifact_name: 'zap-scan-results'
